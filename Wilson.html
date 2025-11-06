@@ -1,0 +1,532 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Wilson - 撿包裹遊戲</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            overflow: hidden;
+            font-family: 'Arial', sans-serif;
+        }
+
+        #gameCanvas {
+            display: block;
+            background: linear-gradient(to bottom, #87CEEB 0%, #87CEEB 60%, #F4A460 60%, #F4A460 70%, #D2B48C 70%);
+        }
+
+        #ui {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: white;
+            font-size: 24px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+            z-index: 10;
+        }
+
+        #title {
+            position: absolute;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 48px;
+            font-weight: bold;
+            color: #FF6347;
+            text-shadow: 3px 3px 6px rgba(0,0,0,0.7);
+            z-index: 10;
+        }
+
+        #startScreen {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.7);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 100;
+        }
+
+        #startScreen h1 {
+            color: white;
+            font-size: 64px;
+            margin-bottom: 20px;
+        }
+
+        #startScreen button {
+            font-size: 32px;
+            padding: 15px 40px;
+            background: #FF6347;
+            color: white;
+            border: none;
+            border-radius: 10px;
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+
+        #startScreen button:hover {
+            transform: scale(1.1);
+        }
+
+        .hidden {
+            display: none !important;
+        }
+    </style>
+</head>
+<body>
+    <div id="startScreen">
+        <h1>🏖️ WILSON 🏐</h1>
+        <p style="color: white; font-size: 24px; margin-bottom: 30px;">撿起所有漂來的FedEx包裹！</p>
+        <button onclick="startGame()">開始遊戲</button>
+    </div>
+
+    <div id="title">WILSON</div>
+    <div id="ui">
+        <div>分數: <span id="score">0</span></div>
+    </div>
+    
+    <canvas id="gameCanvas"></canvas>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+
+        let score = 0;
+        let gameRunning = false;
+        let packages = [];
+        let waves = [];
+        let volleyballs = [];
+        let missedPackages = 0;
+        
+        // 載入威爾森排球圖片
+        const wilsonBall = new Image();
+        wilsonBall.crossOrigin = "anonymous";
+        wilsonBall.onerror = function() {
+            console.log('威爾森圖片載入失敗，使用備用圖案');
+        };
+        
+        // 使用本地上傳的圖片
+        fetch('/mnt/user-data/uploads/截圖_2025-11-06_上午11_49_53.png')
+            .then(res => res.blob())
+            .then(blob => {
+                wilsonBall.src = URL.createObjectURL(blob);
+            })
+            .catch(err => {
+                console.log('無法載入威爾森圖片');
+            });
+        
+        // 懲罰圖片URL
+        const punishmentImgUrl = '/mnt/user-data/uploads/1762401416206_1516549848-1978888598.jpg';
+
+        // 角色（披頭散髮的小人）
+        const character = {
+            x: canvas.width - 150,
+            y: canvas.height * 0.65,
+            width: 60,
+            height: 100
+        };
+
+        // 包裹類別
+        class Package {
+            constructor() {
+                this.x = Math.random() * (canvas.width * 0.3);
+                this.y = canvas.height * 0.65 - 50;
+                this.width = 50;
+                this.height = 40;
+                this.speed = 1 + Math.random() * 2;
+                this.clicked = false;
+            }
+
+            update() {
+                this.x += this.speed;
+                // 檢查是否漏掉
+                if (this.x > canvas.width && !this.clicked) {
+                    missedPackages++;
+                    if (missedPackages >= 10) {
+                        showPunishment();
+                        missedPackages = 0;
+                    }
+                }
+            }
+
+            draw() {
+                // FedEx包裹
+                ctx.fillStyle = '#4B0082';
+                ctx.fillRect(this.x, this.y, this.width, this.height);
+                
+                ctx.fillStyle = '#FF6347';
+                ctx.fillRect(this.x + 5, this.y + 5, this.width - 10, this.height - 10);
+                
+                ctx.fillStyle = 'white';
+                ctx.font = '12px Arial';
+                ctx.fillText('FedEx', this.x + 8, this.y + 25);
+            }
+
+            isClicked(mouseX, mouseY) {
+                return mouseX > this.x && mouseX < this.x + this.width &&
+                       mouseY > this.y && mouseY < this.y + this.height;
+            }
+        }
+        
+        // 威爾森排球類別
+        class Volleyball {
+            constructor() {
+                this.x = Math.random() * (canvas.width * 0.3);
+                this.y = canvas.height * 0.65 - 80;
+                this.size = 70;
+                this.speed = 0.8 + Math.random() * 1.5;
+                this.clicked = false;
+                this.bobOffset = Math.random() * Math.PI * 2;
+            }
+
+            update() {
+                this.x += this.speed;
+                this.bobOffset += 0.05;
+            }
+
+            draw() {
+                const bobY = this.y + Math.sin(this.bobOffset) * 5;
+                
+                if (wilsonBall.complete && wilsonBall.width > 0) {
+                    try {
+                        ctx.drawImage(wilsonBall, this.x, bobY, this.size, this.size);
+                    } catch(e) {
+                        // 如果繪製失敗，使用備用圖案
+                        this.drawFallback(bobY);
+                    }
+                } else {
+                    // 備用圖案
+                    this.drawFallback(bobY);
+                }
+            }
+            
+            drawFallback(bobY) {
+                // 白色排球
+                ctx.fillStyle = 'white';
+                ctx.beginPath();
+                ctx.arc(this.x + this.size/2, bobY + this.size/2, this.size/2, 0, Math.PI * 2);
+                ctx.fill();
+                
+                // 畫血手印效果
+                ctx.fillStyle = '#8B0000';
+                ctx.beginPath();
+                ctx.arc(this.x + this.size/2, bobY + this.size/2, this.size/3, 0, Math.PI * 2);
+                ctx.fill();
+                
+                // 眼睛
+                ctx.fillStyle = 'white';
+                ctx.beginPath();
+                ctx.arc(this.x + this.size/2 - 8, bobY + this.size/2 - 5, 4, 0, Math.PI * 2);
+                ctx.arc(this.x + this.size/2 + 8, bobY + this.size/2 - 5, 4, 0, Math.PI * 2);
+                ctx.fill();
+                
+                // 嘴巴
+                ctx.strokeStyle = 'white';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.arc(this.x + this.size/2, bobY + this.size/2 + 5, 8, 0.2, Math.PI - 0.2);
+                ctx.stroke();
+            }
+
+            isClicked(mouseX, mouseY) {
+                const centerX = this.x + this.size/2;
+                const centerY = this.y + this.size/2;
+                const distance = Math.sqrt((mouseX - centerX)**2 + (mouseY - centerY)**2);
+                return distance < this.size/2;
+            }
+        }
+
+        // 海浪效果
+        class Wave {
+            constructor() {
+                this.x = 0;
+                this.offset = Math.random() * 100;
+                this.speed = 0.5 + Math.random() * 0.5;
+            }
+
+            update() {
+                this.offset += this.speed;
+            }
+
+            draw(y) {
+                ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                for (let x = 0; x < canvas.width; x += 5) {
+                    const waveY = y + Math.sin((x + this.offset) * 0.02) * 10;
+                    if (x === 0) {
+                        ctx.moveTo(x, waveY);
+                    } else {
+                        ctx.lineTo(x, waveY);
+                    }
+                }
+                ctx.stroke();
+            }
+        }
+
+        // 初始化海浪
+        for (let i = 0; i < 3; i++) {
+            waves.push(new Wave());
+        }
+
+        function drawCharacter() {
+            // 身體
+            ctx.fillStyle = '#8B4513';
+            ctx.fillRect(character.x, character.y + 40, character.width, character.height - 40);
+            
+            // 頭
+            ctx.fillStyle = '#D2691E';
+            ctx.beginPath();
+            ctx.arc(character.x + character.width/2, character.y + 20, 20, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // 披頭散髮
+            ctx.strokeStyle = '#654321';
+            ctx.lineWidth = 3;
+            for (let i = 0; i < 8; i++) {
+                const angle = (Math.PI / 8) * i - Math.PI/2;
+                const startX = character.x + character.width/2 + Math.cos(angle) * 15;
+                const startY = character.y + 20 + Math.sin(angle) * 15;
+                const endX = startX + Math.cos(angle) * 15;
+                const endY = startY + Math.sin(angle) * 15;
+                
+                ctx.beginPath();
+                ctx.moveTo(startX, startY);
+                ctx.lineTo(endX, endY);
+                ctx.stroke();
+            }
+            
+            // 眼睛
+            ctx.fillStyle = 'black';
+            ctx.beginPath();
+            ctx.arc(character.x + character.width/2 - 7, character.y + 18, 3, 0, Math.PI * 2);
+            ctx.arc(character.x + character.width/2 + 7, character.y + 18, 3, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // 嘴巴
+            ctx.beginPath();
+            ctx.arc(character.x + character.width/2, character.y + 25, 8, 0, Math.PI);
+            ctx.stroke();
+        }
+
+        function drawSun() {
+            ctx.fillStyle = '#FFD700';
+            ctx.beginPath();
+            ctx.arc(100, 100, 40, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // 陽光線條
+            for (let i = 0; i < 8; i++) {
+                const angle = (Math.PI * 2 / 8) * i;
+                ctx.strokeStyle = '#FFD700';
+                ctx.lineWidth = 3;
+                ctx.beginPath();
+                ctx.moveTo(100 + Math.cos(angle) * 45, 100 + Math.sin(angle) * 45);
+                ctx.lineTo(100 + Math.cos(angle) * 60, 100 + Math.sin(angle) * 60);
+                ctx.stroke();
+            }
+        }
+
+        function spawnPackage() {
+            if (Math.random() < 0.02 && gameRunning) {
+                packages.push(new Package());
+            }
+        }
+        
+        function spawnVolleyball() {
+            // 時不時會飄一顆威爾森排球（超稀有！）
+            if (Math.random() < 0.001 && gameRunning) {
+                volleyballs.push(new Volleyball());
+            }
+        }
+        
+        function showPunishment() {
+            gameRunning = false;
+            
+            // 創建懲罰覆蓋層
+            const overlay = document.createElement('div');
+            overlay.style.position = 'fixed';
+            overlay.style.top = '0';
+            overlay.style.left = '0';
+            overlay.style.width = '100%';
+            overlay.style.height = '100%';
+            overlay.style.backgroundColor = 'rgba(0,0,0,0.9)';
+            overlay.style.display = 'flex';
+            overlay.style.flexDirection = 'column';
+            overlay.style.justifyContent = 'center';
+            overlay.style.alignItems = 'center';
+            overlay.style.zIndex = '1000';
+            overlay.id = 'punishment';
+            
+            // 載入懲罰圖片
+            fetch(punishmentImgUrl)
+                .then(res => res.blob())
+                .then(blob => {
+                    const img = document.createElement('img');
+                    img.src = URL.createObjectURL(blob);
+                    img.style.maxWidth = '700px';
+                    img.style.maxHeight = '500px';
+                    img.style.marginBottom = '30px';
+                    img.style.border = '5px solid #FF0000';
+                    img.style.borderRadius = '15px';
+                    img.style.boxShadow = '0 0 30px rgba(255,0,0,0.6)';
+                    overlay.insertBefore(img, overlay.children[1]);
+                })
+                .catch(err => {
+                    console.log('懲罰圖片載入失敗');
+                });
+            
+            const text = document.createElement('div');
+            text.textContent = '😱 WILSON 很失望！😱';
+            text.style.color = '#FF0000';
+            text.style.fontSize = '48px';
+            text.style.fontWeight = 'bold';
+            text.style.marginBottom = '20px';
+            text.style.textShadow = '0 0 20px rgba(255,0,0,0.8)';
+            
+            const subtext = document.createElement('div');
+            subtext.textContent = '你漏掉太多包裹了！';
+            subtext.style.color = 'white';
+            subtext.style.fontSize = '28px';
+            subtext.style.marginBottom = '30px';
+            
+            const button = document.createElement('button');
+            button.textContent = '我知道錯了，繼續遊戲';
+            button.style.fontSize = '24px';
+            button.style.padding = '15px 40px';
+            button.style.background = '#FF6347';
+            button.style.color = 'white';
+            button.style.border = 'none';
+            button.style.borderRadius = '10px';
+            button.style.cursor = 'pointer';
+            button.style.boxShadow = '0 4px 8px rgba(0,0,0,0.3)';
+            button.style.transition = 'transform 0.2s';
+            button.style.fontWeight = 'bold';
+            
+            button.onmouseover = () => {
+                button.style.transform = 'scale(1.05)';
+                button.style.background = '#FF4500';
+            };
+            
+            button.onmouseout = () => {
+                button.style.transform = 'scale(1)';
+                button.style.background = '#FF6347';
+            };
+            
+            button.onclick = () => {
+                document.body.removeChild(overlay);
+                gameRunning = true;
+                update();
+            };
+            
+            overlay.appendChild(text);
+            overlay.appendChild(subtext);
+            overlay.appendChild(button);
+            document.body.appendChild(overlay);
+        }
+
+        function update() {
+            if (!gameRunning) return;
+
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // 繪製背景元素
+            drawSun();
+            
+            // 繪製海浪
+            waves.forEach((wave, index) => {
+                wave.update();
+                wave.draw(canvas.height * 0.6 + index * 5);
+            });
+            
+            // 繪製角色
+            drawCharacter();
+            
+            // 生成和更新包裹
+            spawnPackage();
+            spawnVolleyball();
+            
+            packages = packages.filter(pkg => {
+                pkg.update();
+                pkg.draw();
+                
+                // 移除超出畫面的包裹
+                return pkg.x < canvas.width && !pkg.clicked;
+            });
+            
+            // 更新和繪製排球
+            volleyballs = volleyballs.filter(ball => {
+                ball.update();
+                ball.draw();
+                
+                // 移除超出畫面的排球
+                return ball.x < canvas.width && !ball.clicked;
+            });
+            
+            requestAnimationFrame(update);
+        }
+
+        function startGame() {
+            document.getElementById('startScreen').classList.add('hidden');
+            gameRunning = true;
+            score = 0;
+            packages = [];
+            volleyballs = [];
+            missedPackages = 0;
+            document.getElementById('score').textContent = score;
+            update();
+        }
+
+        canvas.addEventListener('click', (e) => {
+            if (!gameRunning) return;
+            
+            const rect = canvas.getBoundingClientRect();
+            const mouseX = e.clientX - rect.left;
+            const mouseY = e.clientY - rect.top;
+            
+            // 檢查是否點到包裹
+            packages.forEach(pkg => {
+                if (pkg.isClicked(mouseX, mouseY) && !pkg.clicked) {
+                    pkg.clicked = true;
+                    score += 10;
+                    document.getElementById('score').textContent = score;
+                }
+            });
+            
+            // 檢查是否點到威爾森排球（超高分！）
+            volleyballs.forEach(ball => {
+                if (ball.isClicked(mouseX, mouseY) && !ball.clicked) {
+                    ball.clicked = true;
+                    score += 10000;
+                    document.getElementById('score').textContent = score;
+                    
+                    // 顯示特殊效果
+                    ctx.fillStyle = 'rgba(255, 215, 0, 0.8)';
+                    ctx.font = 'bold 48px Arial';
+                    ctx.fillText('+10000!!!', mouseX - 80, mouseY - 30);
+                }
+            });
+        });
+
+        window.addEventListener('resize', () => {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            character.x = canvas.width - 150;
+            character.y = canvas.height * 0.65;
+        });
+    </script>
+</body>
+</html>
